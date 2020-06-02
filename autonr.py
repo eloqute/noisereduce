@@ -3,12 +3,14 @@ import noisereduce as nr
 import numpy as np
 from noisereduce.utils import int16_to_float32, float32_to_int16
 from librosa.feature import rms
+import argparse
+
 
 #
 # Find longest section of audio where the energy is below mean - thresh * stddev
 #
 def find_some_background_noise(rate, y):
-    thresh = 0.0  # A window consitently
+    thresh = 0.0  # A window consistently
     hop_length = 256
     frame_length = 2048
     energy = rms(y=y, frame_length=frame_length, hop_length=hop_length)
@@ -21,10 +23,10 @@ def find_some_background_noise(rate, y):
     longest_noise_start_frame = -1
     current_noise_start_frame = -1
 
-    print(energy.T, mean_energy, std_energy)
-    is_noise = energy < mean_energy  # - thresh * std_energy
+    # print(energy.T, mean_energy, std_energy)
+    is_noise = energy < mean_energy - thresh * std_energy
     is_noise = is_noise[0]
-    print(is_noise)
+    # print(is_noise)
 
     hop_length_secs = hop_length / rate
     frame_length_secs = frame_length / rate
@@ -38,7 +40,8 @@ def find_some_background_noise(rate, y):
                 # print(f'Found end of noise at {i}')
 
                 if current_noise_n_frames > longest_noise_n_frames:
-                    print(f'Found noise of length {current_noise_n_frames} {current_noise_n_frames * hop_length_secs: 3.3} at {hop_length_secs * current_noise_start_frame: 3.3}s')
+                    print(
+                        f'Found noise of length {current_noise_n_frames} {current_noise_n_frames * hop_length_secs: 3.3} at {hop_length_secs * current_noise_start_frame: 3.3}s')
 
                     longest_noise_n_frames = current_noise_n_frames
                     longest_noise_start_frame = current_noise_start_frame
@@ -51,7 +54,8 @@ def find_some_background_noise(rate, y):
                 current_noise_start_frame = i
                 current_noise_n_frames = 1
 
-    return y[longest_noise_start_frame*hop_length:(longest_noise_start_frame+longest_noise_n_frames)*hop_length]
+    pad_frames = 0
+    return y[(longest_noise_start_frame + pad_frames) * hop_length:(longest_noise_start_frame + longest_noise_n_frames - pad_frames) * hop_length]
 
 
 def load_wav(file_name):
@@ -59,15 +63,24 @@ def load_wav(file_name):
 
 
 if __name__ == '__main__':
-    r, y = load_wav('/mnt/d/data/debabble/audio_results/large_data_set/unprocessed/bidir_full_ips/speaker_5_2.5_noise.wav')
+    parser = argparse.ArgumentParser(description='Spectral gating noise reduction')
+    parser.add_argument('--input_file', '-i', type=str, help='Noisy File', required=True)
+    parser.add_argument('--output_file', '-o', type=str, help='Denoised file', required=True)
+    parser.add_argument('--threshold', '-t', type=float, help='Threshold', default=1.5)
+
+    args = parser.parse_args()
+
+    r, y = load_wav(args.input_file)
     y = int16_to_float32(y)
     noise = find_some_background_noise(r, y)
-    wavfile.write('/mnt/d/data/test/speaker_5_2.5_noise.extracted_noise.wav', r, noise)
+    wavfile.write(f'{args.output_file}.noise_section.wav', r, noise)
     reduced_noise = nr.reduce_noise(
-            n_std_thresh=2.0,
-            audio_clip=y,
-            noise_clip=noise,
-            use_tensorflow=False,
-            verbose=False,
-        )
-    wavfile.write('/mnt/d/data/test/speaker_5_2.5_noise.auto_nr.wav', r, np.array(reduced_noise))
+        n_std_thresh=args.threshold,
+        n_fft=1024,
+        win_length=1024,
+        audio_clip=y,
+        noise_clip=noise,
+        use_tensorflow=False,
+        verbose=False,
+    )
+    wavfile.write(args.output_file, r, np.array(reduced_noise))
